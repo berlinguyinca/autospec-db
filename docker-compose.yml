@@ -1,0 +1,42 @@
+# Optional: for adopters WITHOUT an existing Postgres server.
+# If you already run Postgres, skip this entirely — just run
+# scripts/apply.sh and roles/bootstrap-roles.sql against your server.
+#
+#   docker compose up -d
+#   scripts/apply.sh "postgresql://postgres:${POSTGRES_PASSWORD}@localhost:5432/autospec"
+#
+# Grafana: http://localhost:3000 (anonymous read of the provisioned
+# Postgres datasource; set GF_* env for real auth before exposing it).
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: autospec
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d autospec"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  grafana:
+    image: grafana/grafana-oss:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      READ_DSN_PASSWORD: ${READ_DSN_PASSWORD:-}
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+
+volumes:
+  pgdata:

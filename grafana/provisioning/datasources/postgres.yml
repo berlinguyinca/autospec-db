@@ -1,0 +1,14 @@
+apiVersion: 1
+
+datasources:
+  - name: autospec
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    database: autospec
+    user: autospec_read
+    secureJsonData:
+      password: ${READ_DSN_PASSWORD}
+    jsonData:
+      sslmode: disable # compose-internal network; use require against a remote server
+      postgresVersion: 1600
