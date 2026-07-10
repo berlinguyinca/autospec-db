@@ -17,7 +17,26 @@ an optional docker-compose (Postgres + Grafana) for people without a server. The
 autospec core repo — see
 `docs/specs/2026-07-10-autospec-db-telemetry-design.md` there.
 
-## Setup — existing Postgres server (recommended)
+## Install (one line)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/berlinguyinca/autospec-db/main/install.sh | bash
+```
+
+- **First run** writes a config template to `~/.autospec/db.conf` (chmod 600) — fill in
+  your Postgres host + admin credentials and run the same line again.
+- **Second run** creates the database if missing, applies the schema + migrations
+  (idempotent — re-runs only apply new ones), converges the least-privilege roles with
+  generated passwords persisted in `db.conf`, verifies an end-to-end event through the
+  agent role, and writes `~/.autospec/db.env`.
+- `~/.autospec/db.env` is the ONLY thing agents need. Copy it to your other machines
+  (`scp ~/.autospec/db.env host:~/.autospec/`) and every autospec run there reports in.
+  Admin credentials never leave the machine you installed from.
+
+Re-run the same line any time to pick up new migrations.
+
+## Manual setup — existing Postgres server
+
 
 ```bash
 # 1. Schema (as an admin/owner DSN):
@@ -25,8 +44,8 @@ scripts/apply.sh "$ADMIN_DSN"
 
 # 2. Roles — insert-only for agents, read-only for dashboards:
 psql "$ADMIN_DSN" \
-  -v emit_password="'$(openssl rand -hex 16)'" \
-  -v read_password="'$(openssl rand -hex 16)'" \
+  -v emit_password="$(openssl rand -hex 16)" \
+  -v read_password="$(openssl rand -hex 16)" \
   -f roles/bootstrap-roles.sql
 
 # 3. On each agent machine (~/.autospec/db.env, chmod 600):
