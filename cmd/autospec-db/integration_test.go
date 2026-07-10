@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"io/fs"
 	"net/url"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -58,8 +61,8 @@ func TestIntegrationMigrateIdempotency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first apply: %v", err)
 	}
-	if len(applied) != 2 {
-		t.Fatalf("first apply = %v, want 2 migrations", applied)
+	if want := embeddedMigrationNames(t); !reflect.DeepEqual(applied, want) {
+		t.Fatalf("first apply = %v, want all embedded migrations %v", applied, want)
 	}
 	applied2, err := migrate.Apply(ctx, c, autospecdb.Migrations)
 	if err != nil {
@@ -106,9 +109,38 @@ func TestIntegrationShellEraParity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("apply on shell-era server: %v", err)
 	}
-	if len(applied) != 0 {
-		t.Errorf("shell-era parity broken: migrate applied %v, want nothing", applied)
+	// Parity invariant: the shell-era pair is never re-applied; migrations
+	// added after the Go port legitimately apply on a shell-provisioned server.
+	for _, name := range applied {
+		if name == "001_events_raw.sql" || name == "002_views.sql" {
+			t.Errorf("shell-era parity broken: %s re-applied", name)
+		}
 	}
+	var wantNew []string
+	for _, name := range embeddedMigrationNames(t) {
+		if name != "001_events_raw.sql" && name != "002_views.sql" {
+			wantNew = append(wantNew, name)
+		}
+	}
+	if !reflect.DeepEqual(applied, wantNew) {
+		t.Errorf("post-shell-era migrations applied = %v, want %v", applied, wantNew)
+	}
+}
+
+// embeddedMigrationNames lists the embedded migrations/*.sql basenames in
+// filename (= application) order.
+func embeddedMigrationNames(t *testing.T) []string {
+	t.Helper()
+	entries, err := fs.ReadDir(autospecdb.Migrations, "migrations")
+	if err != nil {
+		t.Fatalf("read embedded migrations: %v", err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+	return names
 }
 
 func TestIntegrationIngestDedup(t *testing.T) {
