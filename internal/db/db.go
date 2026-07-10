@@ -63,6 +63,9 @@ func Connect(ctx context.Context, p Params) (*pgx.Conn, error) {
 	if p.Timeout > 0 {
 		cfg.ConnectTimeout = p.Timeout
 	}
+	// Pooler-proof: no prepared-statement cache, works through pgbouncer in
+	// any pool_mode (session today; transaction-safe if that ever changes).
+	cfg.DefaultQueryExecMode = pgx.QueryExecModeExec
 	return pgx.ConnectConfig(ctx, cfg)
 }
 
@@ -75,6 +78,8 @@ func ConnectDSN(ctx context.Context, dsn string, timeout time.Duration) (*pgx.Co
 	if timeout > 0 {
 		cfg.ConnectTimeout = timeout
 	}
+	// Pooler-proof: see Connect.
+	cfg.DefaultQueryExecMode = pgx.QueryExecModeExec
 	return pgx.ConnectConfig(ctx, cfg)
 }
 

@@ -1,6 +1,7 @@
 package payload
 
 import (
+	"strings"
 	"os"
 	"strconv"
 	"testing"
@@ -115,5 +116,24 @@ func TestBuildJSONValid(t *testing.T) {
 	}
 	if len(b) == 0 || b[0] != '{' {
 		t.Errorf("not a JSON object: %s", b)
+	}
+}
+
+func TestHostLabelOverride(t *testing.T) {
+	t.Setenv("AUTOSPEC_DB_HOST_LABEL", "office-site")
+	m := Build("heartbeat", nil)
+	if m["host"] != "office-site" {
+		t.Fatalf("host = %q, want office-site", m["host"])
+	}
+}
+
+func TestHostDefaultsToShortHostname(t *testing.T) {
+	t.Setenv("AUTOSPEC_DB_HOST_LABEL", "")
+	m := Build("heartbeat", nil)
+	if m["host"] == "" {
+		t.Fatal("host is empty")
+	}
+	if strings.ContainsRune(m["host"], '.') {
+		t.Fatalf("host %q not shortened", m["host"])
 	}
 }

@@ -33,8 +33,13 @@ func SessionID() string {
 	return "pid-" + strconv.Itoa(os.Getppid())
 }
 
-// shortHost returns the hostname truncated at the first dot (hostname -s).
+// shortHost returns AUTOSPEC_DB_HOST_LABEL when set (site/machine
+// disambiguation for generic hostnames), else the hostname truncated at the
+// first dot (hostname -s).
 func shortHost() string {
+	if l := os.Getenv("AUTOSPEC_DB_HOST_LABEL"); l != "" {
+		return l
+	}
 	h, _ := os.Hostname()
 	if i := strings.IndexByte(h, '.'); i >= 0 {
 		h = h[:i]
