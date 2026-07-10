@@ -1,0 +1,43 @@
+version: 2
+
+project_name: autospec-db
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: autospec-db
+    main: ./cmd/autospec-db
+    binary: autospec-db
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: autospec-db
+    formats: [tar.gz]
+    name_template: "autospec-db_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  github:
+    owner: berlinguyinca
+    name: autospec-db
+
+changelog:
+  disable: true

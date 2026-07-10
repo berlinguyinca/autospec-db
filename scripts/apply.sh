@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+# apply.sh — MANUAL psql FALLBACK. The `autospec-db` binary (migrate/install
+# subcommands) is the primary path and embeds these same migrations. This
+# script exists for operators who prefer raw psql or have no binary handy; it
+# stays byte-compatible with the binary's autospec.schema_migrations tracking.
+#
 # apply.sh — apply migrations/*.sql in filename order, tracked in
 # autospec.schema_migrations so re-runs are no-ops. bash 3.2 compatible.
 #
