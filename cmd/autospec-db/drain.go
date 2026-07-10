@@ -29,10 +29,10 @@ func cmdDrain(args []string) int {
 		return 0
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	conn, err := db.ConnectDSN(ctx, dsn, 2*time.Second)
+	conn, err := db.ConnectDSN(ctx, dsn, 8*time.Second)
 	if err != nil {
 		size, lines, _ := sp.Stat()
 		fmt.Printf("replayed=0 dropped=0 kept=%d (database unreachable; %d bytes spooled)\n", lines, size)
@@ -41,7 +41,7 @@ func cmdDrain(args []string) int {
 	defer conn.Close(context.Background())
 
 	res, err := sp.Drain(func(l []byte) error {
-		dctx, dcancel := context.WithTimeout(context.Background(), 3*time.Second)
+		dctx, dcancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer dcancel()
 		ierr := db.Ingest(dctx, conn, l)
 		if ierr == nil {
