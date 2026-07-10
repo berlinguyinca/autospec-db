@@ -127,3 +127,22 @@ func TestConfPathOverride(t *testing.T) {
 		t.Errorf("ConfPath = %q", ConfPath())
 	}
 }
+
+func TestDisabled(t *testing.T) {
+	t.Setenv("AUTOSPEC_DB_DISABLE", "")
+	if Disabled() {
+		t.Error("empty should not disable")
+	}
+	t.Setenv("AUTOSPEC_DB_DISABLE", "0")
+	if Disabled() {
+		t.Error("0 should not disable")
+	}
+	t.Setenv("AUTOSPEC_DB_DISABLE", "1")
+	if !Disabled() {
+		t.Error("1 should disable")
+	}
+	t.Setenv("AUTOSPEC_DB_DISABLE", "true")
+	if !Disabled() {
+		t.Error("true should disable")
+	}
+}

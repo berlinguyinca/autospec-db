@@ -75,6 +75,9 @@ autospec-db install
   process still exits 0. A successful emit opportunistically drains the spool. The spool
   is capped (`AUTOSPEC_DB_SPOOL_MAX_BYTES`, default 10 MB) and drops the oldest lines on
   overflow — telemetry is lossy-by-design, runs are not. Server *data* errors (bad cast)
+- `AUTOSPEC_DB_DISABLE=1` is the hard kill switch: `emit` and `drain` exit 0
+  immediately — no config resolution, no network, no spool. Export it in test
+  harnesses and CI so test runs can never leak telemetry into a real database.
 - `AUTOSPEC_DB_HOST_LABEL` overrides the auto-detected short hostname in every
   event's `host` field — set it per machine (e.g. `home`, `office`, `lab`) when
   hostnames are too generic to tell your sites apart.

@@ -20,6 +20,10 @@ func cmdDrain(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	if config.Disabled() {
+		fmt.Println("autospec-db: disabled via AUTOSPEC_DB_DISABLE; nothing drained")
+		return 0
+	}
 
 	sp := spool.Default(config.SpoolPath())
 

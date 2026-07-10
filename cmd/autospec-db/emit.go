@@ -18,6 +18,9 @@ import (
 // spool. The top-level recover guarantees exit 0 even on an unexpected panic.
 func cmdEmit(args []string) {
 	defer func() { _ = recover() }()
+	if config.Disabled() {
+		return
+	}
 
 	fs := flag.NewFlagSet("emit", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)

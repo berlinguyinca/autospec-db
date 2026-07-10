@@ -38,6 +38,15 @@ var confKeys = []struct {
 }
 
 // Home returns $HOME (respecting an overridden environment).
+// Disabled reports whether telemetry is hard-disabled via AUTOSPEC_DB_DISABLE.
+// Any non-empty value other than "0" disables. This is the kill switch for
+// test harnesses and emergencies: emit and drain exit 0 immediately — no
+// config resolution, no network, no spool.
+func Disabled() bool {
+	v := os.Getenv("AUTOSPEC_DB_DISABLE")
+	return v != "" && v != "0"
+}
+
 func Home() string {
 	if h := os.Getenv("HOME"); h != "" {
 		return h
