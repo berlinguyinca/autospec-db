@@ -29,10 +29,10 @@ func cmdSessions(args []string) int {
 		return 1
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	conn, err := db.ConnectDSN(ctx, dsn, 5*time.Second)
+	conn, err := db.ConnectDSN(ctx, dsn, 8*time.Second)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "autospec-db sessions: connect: %v\n", err)
 		return 1

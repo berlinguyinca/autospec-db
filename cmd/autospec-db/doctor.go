@@ -41,13 +41,13 @@ func cmdDoctor(args []string) int {
 		fail("db.env", "missing at "+config.EnvPath())
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	// admin connectivity + server facts
 	var adminConn *pgx.Conn
 	if confExists && conf.AdminPassword != "" {
-		c, err := db.Connect(ctx, adminParams(conf, conf.Name, 5*time.Second))
+		c, err := db.Connect(ctx, adminParams(conf, conf.Name, 8*time.Second))
 		if err != nil {
 			fail("admin connect", err.Error())
 		} else {
@@ -67,7 +67,7 @@ func cmdDoctor(args []string) int {
 
 	// emit connectivity
 	if dsn, present := config.EmitDSN(); present {
-		c, err := db.ConnectDSN(ctx, dsn, 3*time.Second)
+		c, err := db.ConnectDSN(ctx, dsn, 8*time.Second)
 		if err != nil {
 			fail("emit connect", err.Error())
 		} else {
@@ -80,7 +80,7 @@ func cmdDoctor(args []string) int {
 
 	// read connectivity
 	if dsn, present := config.ReadDSN(); present {
-		c, err := db.ConnectDSN(ctx, dsn, 3*time.Second)
+		c, err := db.ConnectDSN(ctx, dsn, 8*time.Second)
 		if err != nil {
 			fail("read connect", err.Error())
 		} else {
