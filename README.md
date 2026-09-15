@@ -97,6 +97,13 @@ autospec-db install
   clock skew cannot fake liveness
 - `autospec.features` — searchable corpus of every feature description the pipeline
   generated
+- `autospec.resilience_events` — mirrored lifecycle of the resilient agent runtime:
+  context guardian checkpoints/resumes, durable work protocol (work/claim/attempt/
+  validation/review), attention streams, memory-map generations, and verified-learning
+  lesson promotion/rejection. Additive projection; telemetry is never a correctness
+  source. Kinds: `context.threshold_reached`, `checkpoint.*`, `execution.resumed`,
+  `work.*`, `claim.*`, `attempt.*`, `validation.completed`, `review.completed`,
+  `attention.*`, `memory.*`, `lesson.*`.
 
 ## Manual setup — existing Postgres server (psql fallback)
 
