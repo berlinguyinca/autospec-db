@@ -1,0 +1,47 @@
+# Woodpecker CI (ci.metabolomics.us) -- the autospec-db gate.
+#
+# This replaces the TeamCity build `Autospec_AutospecDbCi`, whose single step
+# "Postgres instance and go test -race" started a postgres:16 Apptainer
+# instance from a SIF on quobyte, exported AUTOSPEC_DB_TEST_DSN, and ran
+# `go vet` / `go build` / `go test -race` plus a guard asserting the
+# integration tests were not silently skipped. All of that migrates: see
+# ops/ci/woodpecker-gates.sh, which carries the same three commands and the
+# same guard, and starts the database WITHOUT a container.
+#
+# Exec hosts are Slurm jobs on Rocky 9 nodes, so:
+#
+#  * `image:` is a HOST executable, not a container image: `bash` runs the
+#    job's own shell. There is no docker, no apt and no sudo.
+#  * The clone plugin fails invisibly on this backend (no step logs for
+#    plugins), so skip_clone + a plain git checkout step, with the forge
+#    credential staged at /etc/woodpecker-git-credentials.
+#  * The agent reproducibly drops a step's final log chunk, so the step
+#    script prints its journal path FIRST and tees everything to it.
+#
+# The step logic lives in this repo rather than on the CI host, so a check
+# changes in the same commit as the code it covers, and it takes no
+# Woodpecker-specific input: `bash ops/ci/woodpecker-gates.sh` reproduces CI
+# from a clean checkout. It needs no Woodpecker secret -- the throwaway
+# cluster's superuser password is generated per run.
+when:
+  - event: [push, pull_request, manual]
+
+skip_clone: true
+
+steps:
+  - name: checkout
+    image: bash
+    commands:
+      - 'set -eu'
+      - 'test -r /etc/woodpecker-git-credentials || { echo "the job staged no forge credential" >&2; exit 1; }'
+      - 'git init -q -b "${CI_COMMIT_BRANCH:-main}" .'
+      - 'git remote add origin "https://github.com/${CI_REPO}.git"'
+      - 'git fetch --no-tags --depth=1 origin "$CI_COMMIT_SHA"'
+      - 'git checkout -q FETCH_HEAD'
+      - 'git --no-pager log --oneline -1'
+
+  - name: gates
+    image: bash
+    commands:
+      - 'set -eu'
+      - 'bash ops/ci/woodpecker-gates.sh'
