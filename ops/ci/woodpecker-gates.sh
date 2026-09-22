@@ -33,7 +33,13 @@ journal=""
 for candidate in "${WOODPECKER_JOURNAL_DIR:-}" /home/wohlgemuth/woodpecker/logs; do
   [ -n "$candidate" ] || continue
   if mkdir -p "$candidate" 2>/dev/null && [ -w "$candidate" ]; then
-    journal="$candidate/autospec-db-gates-${CI_COMMIT_SHA:-local}-$(date +%s).log"
+    # $$ as well as the timestamp. Woodpecker builds every commit TWICE here --
+    # a push pipeline and a pull_request pipeline, concurrently, on the same
+    # SHA -- and a name built from sha+seconds collides for that pair. Observed:
+    # both runs appended to one file and their output interleaved line by line,
+    # which defeats the entire point of the journal, since the run it exists to
+    # explain is the one that failed fast and left nothing in the agent's log.
+    journal="$candidate/autospec-db-gates-${CI_COMMIT_SHA:-local}-$(date +%s)-$$.log"
     break
   fi
 done
