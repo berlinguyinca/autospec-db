@@ -337,3 +337,163 @@ func dsnParams(t *testing.T, dsn string) db.Params {
 		SSLMode:  sslmode,
 	}
 }
+
+// TestIntegrationMissionEventsView covers the T20a correlation view: typed
+// mission/task/execution columns over events_raw, missing keys as NULL (a read
+// never throws), and the emit role's inability to read the projection.
+func TestIntegrationMissionEventsView(t *testing.T) {
+	c := adminConn(t)
+	resetSchema(t, c)
+	ctx := context.Background()
+	if _, err := migrate.Apply(ctx, c, autospecdb.Migrations); err != nil {
+		t.Fatal(err)
+	}
+
+	// a payload carrying mission/task/execution ids
+	line, _ := payload.BuildJSON("mission.started", []string{
+		"mission_id=m1", "task_id=t1", "execution_id=e1",
+		"session_id=s1", "repo=berlinguyinca/autospec-db",
+	})
+	if err := db.Ingest(ctx, c, line); err != nil {
+		t.Fatalf("ingest m1: %v", err)
+	}
+	// a payload WITHOUT a mission_id (nor task/execution ids)
+	line2, _ := payload.BuildJSON("heartbeat", []string{"session_id=s2"})
+	if err := db.Ingest(ctx, c, line2); err != nil {
+		t.Fatalf("ingest no-mission: %v", err)
+	}
+
+	// (1) the m1 payload appears with its typed columns
+	var kind, sessionID, repo, missionID, taskID, execID string
+	err := c.QueryRow(ctx,
+		`select kind, session_id, repo, mission_id, task_id, execution_id
+		   from autospec.mission_events where mission_id = 'm1'`).
+		Scan(&kind, &sessionID, &repo, &missionID, &taskID, &execID)
+	if err != nil {
+		t.Fatalf("select mission_events for m1: %v", err)
+	}
+	if missionID != "m1" || taskID != "t1" || execID != "e1" {
+		t.Errorf("m1 row = mission_id=%q task_id=%q execution_id=%q, want m1/t1/e1",
+			missionID, taskID, execID)
+	}
+	if sessionID != "s1" || repo != "berlinguyinca/autospec-db" {
+		t.Errorf("m1 row = session_id=%q repo=%q, want s1/berlinguyinca/autospec-db",
+			sessionID, repo)
+	}
+
+	// (2) the no-mission payload appears with NULL mission_id, and the select
+	// returns no error (missing key reads as NULL, never throws)
+	var nullMission *string
+	err = c.QueryRow(ctx,
+		`select mission_id from autospec.mission_events where session_id = 's2'`).
+		Scan(&nullMission)
+	if err != nil {
+		t.Fatalf("select no-mission row: %v", err)
+	}
+	if nullMission != nil {
+		t.Errorf("no-mission row mission_id = %q, want NULL", *nullMission)
+	}
+
+	// (3) the insert-only emit role gets a permission error selecting the view
+	emitPw := "emit_" + uuid.NewString()
+	readPw := "read_" + uuid.NewString()
+	if err := convergeRoles(ctx, c, emitPw, readPw); err != nil {
+		t.Fatalf("convergeRoles: %v", err)
+	}
+	p := dsnParams(t, testDSN(t))
+	p.User = "autospec_emit"
+	p.Password = emitPw
+	p.Timeout = 5 * time.Second
+	emitConn, err := db.Connect(ctx, p)
+	if err != nil {
+		t.Fatalf("emit connect: %v", err)
+	}
+	defer emitConn.Close(context.Background())
+	var x int
+	if err := emitConn.QueryRow(ctx, "select count(*) from autospec.mission_events").Scan(&x); err == nil {
+		t.Error("emit role SELECT on mission_events should be denied, but succeeded")
+	}
+}
+
+// TestIntegrationMissionEventsRollback runs the operator rollback file and
+// proves it drops the view + its partial indexes without touching events_raw,
+// and that a second migrate.Apply re-creates the view.
+func TestIntegrationMissionEventsRollback(t *testing.T) {
+	c := adminConn(t)
+	resetSchema(t, c)
+	ctx := context.Background()
+	if _, err := migrate.Apply(ctx, c, autospecdb.Migrations); err != nil {
+		t.Fatal(err)
+	}
+
+	line, _ := payload.BuildJSON("mission.started", []string{"mission_id=m1"})
+	if err := db.Ingest(ctx, c, line); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	var before int
+	if err := c.QueryRow(ctx, "select count(*) from autospec.events_raw").Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+
+	// the rollback file is operator-facing (not applied by migrate, not embedded)
+	rollback, err := os.ReadFile("../../migrations/rollback/005_mission_correlation.down.sql")
+	if err != nil {
+		t.Fatalf("read rollback file: %v", err)
+	}
+	if _, err := c.Exec(ctx, string(rollback)); err != nil {
+		t.Fatalf("apply rollback file: %v", err)
+	}
+
+	// the view and both partial indexes are gone
+	var rel int
+	if err := c.QueryRow(ctx, `
+		select count(*) from pg_class c
+		join pg_namespace n on n.oid = c.relnamespace
+		where n.nspname = 'autospec'
+		  and c.relname in ('mission_events','events_raw_mission_idx','events_raw_execution_idx')
+	`).Scan(&rel); err != nil {
+		t.Fatal(err)
+	}
+	if rel != 0 {
+		t.Errorf("rollback left %d mission_events object(s) behind, want 0", rel)
+	}
+
+	// the 005 schema_migrations row is deleted by the rollback
+	var mig int
+	if err := c.QueryRow(ctx,
+		"select count(*) from autospec.schema_migrations where filename = '005_mission_correlation.sql'").
+		Scan(&mig); err != nil {
+		t.Fatal(err)
+	}
+	if mig != 0 {
+		t.Error("rollback should delete the 005 schema_migrations row")
+	}
+
+	// events_raw keeps its row count
+	var after int
+	if err := c.QueryRow(ctx, "select count(*) from autospec.events_raw").Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Errorf("events_raw row count changed: before=%d after=%d", before, after)
+	}
+
+	// a second migrate.Apply re-creates the view
+	applied, err := migrate.Apply(ctx, c, autospecdb.Migrations)
+	if err != nil {
+		t.Fatalf("re-apply after rollback: %v", err)
+	}
+	var reApplied bool
+	for _, n := range applied {
+		if n == "005_mission_correlation.sql" {
+			reApplied = true
+		}
+	}
+	if !reApplied {
+		t.Errorf("re-apply did not re-apply 005; applied = %v", applied)
+	}
+	var n int
+	if err := c.QueryRow(ctx, "select count(*) from autospec.mission_events").Scan(&n); err != nil {
+		t.Errorf("mission_events not re-created after re-apply: %v", err)
+	}
+}
