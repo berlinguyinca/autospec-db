@@ -497,3 +497,146 @@ func TestIntegrationMissionEventsRollback(t *testing.T) {
 		t.Errorf("mission_events not re-created after re-apply: %v", err)
 	}
 }
+
+// TestIntegrationModelTokenUsage verifies the autospec.model_token_usage
+// projection: per-mission/per-model token sums with non-throwing casts and
+// replay dedup. Payload key names copy the T08 event schema (mission_id,
+// model, input_tokens, output_tokens); nothing is invented here.
+func TestIntegrationModelTokenUsage(t *testing.T) {
+	c := adminConn(t)
+	resetSchema(t, c)
+	ctx := context.Background()
+	if _, err := migrate.Apply(ctx, c, autospecdb.Migrations); err != nil {
+		t.Fatal(err)
+	}
+
+	// mission m1 / model qwen: two valid events (input 10 and 5) plus one
+	// malformed (input 12x). The malformed value must read as NULL, so the
+	// summed input stays 15 and the select never raises.
+	for _, in := range []string{"10", "5", "12x"} {
+		line, _ := payload.BuildJSON("execution.completed", []string{
+			"mission_id=m1", "model=qwen", "input_tokens=" + in, "output_tokens=1",
+		})
+		if err := db.Ingest(ctx, c, line); err != nil {
+			t.Fatalf("ingest m1/qwen input=%s: %v", in, err)
+		}
+	}
+
+	// replay dedup: the same event_uuid ingested twice must be counted once.
+	// A separate mission (m2) keeps this from perturbing the m1/qwen totals.
+	dup, _ := payload.BuildJSON("execution.completed", []string{
+		"mission_id=m2", "model=qwen", "input_tokens=1000", "output_tokens=1",
+	})
+	if err := db.Ingest(ctx, c, dup); err != nil {
+		t.Fatalf("ingest dup (first): %v", err)
+	}
+	if err := db.Ingest(ctx, c, dup); err != nil {
+		t.Fatalf("ingest dup (second, must dedup): %v", err)
+	}
+
+	// (1)+(2): m1/qwen sums 10 + 5; the 12x event contributes NULL.
+	var m1in int64
+	if err := c.QueryRow(ctx,
+		`select input_tokens from autospec.model_token_usage
+		   where mission_id = 'm1' and model = 'qwen'`).Scan(&m1in); err != nil {
+		t.Fatalf("select m1/qwen: %v", err)
+	}
+	if m1in != 15 {
+		t.Errorf("m1/qwen input_tokens = %d, want 15 (10 + 5, 12x is NULL)", m1in)
+	}
+
+	// (3): m2/qwen counts the replayed event once (1000, not 2000).
+	var m2in int64
+	if err := c.QueryRow(ctx,
+		`select input_tokens from autospec.model_token_usage
+		   where mission_id = 'm2' and model = 'qwen'`).Scan(&m2in); err != nil {
+		t.Fatalf("select m2/qwen: %v", err)
+	}
+	if m2in != 1000 {
+		t.Errorf("m2/qwen input_tokens = %d, want 1000 (replay counted once)", m2in)
+	}
+}
+
+// TestIntegrationModelTokenUsageRollback runs the operator rollback file and
+// proves it drops the view without touching events_raw, and that a second
+// migrate.Apply re-creates it.
+func TestIntegrationModelTokenUsageRollback(t *testing.T) {
+	c := adminConn(t)
+	resetSchema(t, c)
+	ctx := context.Background()
+	if _, err := migrate.Apply(ctx, c, autospecdb.Migrations); err != nil {
+		t.Fatal(err)
+	}
+
+	line, _ := payload.BuildJSON("execution.completed", []string{
+		"mission_id=m1", "model=qwen", "input_tokens=10", "output_tokens=20",
+	})
+	if err := db.Ingest(ctx, c, line); err != nil {
+		t.Fatalf("ingest: %v", err)
+	}
+	var before int
+	if err := c.QueryRow(ctx, "select count(*) from autospec.events_raw").Scan(&before); err != nil {
+		t.Fatal(err)
+	}
+
+	// the rollback file is operator-facing (not applied by migrate, not embedded)
+	rollback, err := os.ReadFile("../../migrations/rollback/006_model_token_usage.down.sql")
+	if err != nil {
+		t.Fatalf("read rollback file: %v", err)
+	}
+	if _, err := c.Exec(ctx, string(rollback)); err != nil {
+		t.Fatalf("apply rollback file: %v", err)
+	}
+
+	// the view is gone
+	var rel int
+	if err := c.QueryRow(ctx, `
+		select count(*) from pg_class c
+		join pg_namespace n on n.oid = c.relnamespace
+		where n.nspname = 'autospec' and c.relname = 'model_token_usage'
+	`).Scan(&rel); err != nil {
+		t.Fatal(err)
+	}
+	if rel != 0 {
+		t.Errorf("rollback left %d model_token_usage object(s) behind, want 0", rel)
+	}
+
+	// the 006 schema_migrations row is deleted by the rollback
+	var mig int
+	if err := c.QueryRow(ctx,
+		"select count(*) from autospec.schema_migrations where filename = '006_model_token_usage.sql'").
+		Scan(&mig); err != nil {
+		t.Fatal(err)
+	}
+	if mig != 0 {
+		t.Error("rollback should delete the 006 schema_migrations row")
+	}
+
+	// events_raw keeps its row count
+	var after int
+	if err := c.QueryRow(ctx, "select count(*) from autospec.events_raw").Scan(&after); err != nil {
+		t.Fatal(err)
+	}
+	if after != before {
+		t.Errorf("events_raw row count changed: before=%d after=%d", before, after)
+	}
+
+	// a second migrate.Apply re-creates the view
+	applied, err := migrate.Apply(ctx, c, autospecdb.Migrations)
+	if err != nil {
+		t.Fatalf("re-apply after rollback: %v", err)
+	}
+	var reApplied bool
+	for _, n := range applied {
+		if n == "006_model_token_usage.sql" {
+			reApplied = true
+		}
+	}
+	if !reApplied {
+		t.Errorf("re-apply did not re-apply 006; applied = %v", applied)
+	}
+	var n int
+	if err := c.QueryRow(ctx, "select count(*) from autospec.model_token_usage").Scan(&n); err != nil {
+		t.Errorf("model_token_usage not re-created after re-apply: %v", err)
+	}
+}
